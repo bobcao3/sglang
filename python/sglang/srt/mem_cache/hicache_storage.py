@@ -471,6 +471,10 @@ class HiCacheFile(HiCacheStorage):
             with open(tensor_path, "rb", buffering=0) as f:
                 buf = memoryview(target_location.view(torch.uint8).contiguous().numpy())
                 if f.readinto(buf) != expected:
+                    # Truncated page (e.g. the writer was killed mid
+                    # write-through). A storage-tier miss must never be
+                    # fatal: drop the bad file and let the caller
+                    # recompute/refetch.
                     raise IOError(f"Short read for {suffixed}")
             self._evictor.touch(suffixed, tensor_path)
             if self.metadata_cache is not None:
@@ -480,6 +484,17 @@ class HiCacheFile(HiCacheStorage):
             if self.metadata_cache is not None:
                 self.metadata_cache.remove(suffixed)
             logger.warning(f"Failed to fetch {key} from HiCacheFile storage.")
+            return None
+        except OSError as e:
+            if self.metadata_cache is not None:
+                self.metadata_cache.remove(suffixed)
+            try:
+                os.unlink(tensor_path)
+            except OSError:
+                pass
+            logger.warning(
+                f"Dropping unreadable HiCacheFile page {suffixed}: {e}"
+            )
             return None
 
     def batch_get(
