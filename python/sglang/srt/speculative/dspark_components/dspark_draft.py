@@ -445,3 +445,7 @@ class DraftBlockProposer:
             gnt_logprob, dtype=torch.int64
         ).to(device, non_blocking=True)
         forward_batch.can_run_dp_cuda_graph = batch.can_run_dp_cuda_graph
+        # Mirrors ForwardBatch.init_new (forward_batch_info.py): raw per-rank
+        # request counts, unscaled — decode_cuda_graph_runner.can_run_graph
+        # reads it under require_mlp_tp_gather and crashes on None.
+        forward_batch.original_global_num_tokens_cpu = batch.global_num_tokens
