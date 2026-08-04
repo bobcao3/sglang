@@ -13,6 +13,7 @@ from sglang.kernels.ops.speculative.dspark.dspark_draft_model import (
 from sglang.srt.environ import envs
 from sglang.srt.managers.schedule_batch import ScheduleBatch
 from sglang.srt.model_executor.forward_batch_info import (
+    enable_num_token_non_padded,
     CaptureHiddenMode,
     ForwardBatch,
     ForwardMode,
@@ -410,6 +411,15 @@ class DraftBlockProposer:
             spec_info=self._draft_block_spec_info,
             capture_hidden_mode=CaptureHiddenMode.NULL,
         )
+        # Mirrors ForwardBatch.init_new: the EP path (moe_ep_size > 1) reads
+        # num_token_non_padded(_cpu) in the cuda-graph replay hooks and
+        # crashes on None for hand-built batches.
+        num_draft_tokens = int(draft_forward_batch.input_ids.numel())
+        if enable_num_token_non_padded():
+            draft_forward_batch.num_token_non_padded = torch.tensor(
+                num_draft_tokens, dtype=torch.int32
+            ).to(self.draft_model_runner.device, non_blocking=True)
+        draft_forward_batch.num_token_non_padded_cpu = num_draft_tokens
         self._fill_dp_moe_sync_metadata(draft_forward_batch, batch)
         with torch.inference_mode():
             draft_out = self.draft_model_runner.forward(draft_forward_batch)
